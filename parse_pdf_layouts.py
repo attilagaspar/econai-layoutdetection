@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-# This script processes Table layout elements from parsed layout files.
-# This script is part of the table extraction pipeline.
-# It finds table cells using an OpenCV-based method and saves the bounding box information.
+# This script takes a JSON configuration file as input, processes PDFs in a specified directory,
+# extracts layout information using a LayoutParser, and saves the results in COCO JSON format.
 import os
 import json
 import img2pdf
@@ -10,6 +9,7 @@ import layoutparser as lp
 import numpy as np
 import cv2
 import fitz  # PyMuPDF
+import sys
 
 # --- Monkey-Patching Section ---
 import PIL.Image as Image
@@ -34,11 +34,27 @@ def patched_http_get_local_path(self, path, force=False, **kwargs):
 HTTPURLHandler._get_local_path = patched_http_get_local_path
 # --- End of Monkey-Patching Section ---
 
+
+# --- Load config ---
+if len(sys.argv) < 2:
+    print("Usage: python parse_pdf_layouts_census.py <config.json>")
+    sys.exit(1)
+CONFIG_PATH = sys.argv[1]
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+input_pdf_dir = config["input_pdf_dir"]
+output_dir = config["output_dir"]
+parsed_layout_dir = config["parsed_layout_dir"]
+pdfs_with_layouts_dir = config["pdfs_with_layouts_dir"]
+model_config = config["model"]
+categories = config["categories"]
+
 # --- Configuration ---
-input_pdf_dir = "censuspdf"         # Folder containing PDFs
-output_dir = "output"                # Folder where output will be saved
-parsed_layout_dir = "parsed_layouts"   # Folder where .lo files will be saved
-pdfs_with_layouts_dir = "pdfs_with_layouts"  # (Optional) Folder for PDFs with overlaid layouts
+#input_pdf_dir = "censuspdf"         # Folder containing PDFs
+#output_dir = "output"                # Folder where output will be saved
+#parsed_layout_dir = "parsed_layouts"   # Folder where .lo files will be saved
+#pdfs_with_layouts_dir = "pdfs_with_layouts"  # (Optional) Folder for PDFs with overlaid layouts
 
 # Toggle: If True, generate new PDFs with the layouts overlaid.
 generate_pdf_with_layouts = True
@@ -80,6 +96,19 @@ def get_pdf_dpi(pdf_path, page_num):
     
     return dpi
 
+
+
+# --- Helper Function for Image Compression ---
+def save_compressed_image(image, output_path, quality=75):
+    """
+    Save an image with JPEG compression.
+
+    Args:
+        image (numpy.ndarray): The image to save.
+        output_path (str): The path to save the compressed image.
+        quality (int): JPEG quality (1-100, higher is better quality).
+    """
+    cv2.imwrite(output_path, image, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
 # --- Merging Functions for Table Elements ---
 def merge_boxes(box1, box2):
@@ -169,13 +198,20 @@ def merge_adjacent_tables(layout_elements, gap_threshold=10):
 # --- End of Merging Functions ---
 
 # --- Initialize Layout Parser Model ---
-model = lp.Detectron2LayoutModel(
-    #config_path = "../koren/layout-model-training/outputs/compass3/fast_rcnn_R_50_FPN_3x/config.yaml",
-    #model_path = "../koren/layout-model-training/outputs/compass3/fast_rcnn_R_50_FPN_3x/model_final.pth",
-    config_path= "../koren/layout-model-training/outputs/census4b/fast_rcnn_R_50_FPN_3x/config.yaml",
-    model_path= "../koren/layout-model-training/outputs/census4b/fast_rcnn_R_50_FPN_3x/model_final.pth",
-    extra_config = ["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7] # <-- Only output high accuracy preds
-)
+try:
+    model = lp.Detectron2LayoutModel(
+        config_path = model_config["config_path"],
+        model_path = model_config["model_path"],
+        #extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.05]
+        extra_config = model_config.get("extra_config", [])
+    )
+    print(model_config)
+except FileNotFoundError as e:
+    print(f"Error: Configuration or model file not found. {e}")
+    raise
+except Exception as e:
+    print(f"Error initializing Detectron2LayoutModel: {e}")
+    raise
 
 
 
@@ -208,6 +244,9 @@ for pdf_filename in os.listdir(input_pdf_dir):
     
 
     # COCO JSON structure
+    """
+    this is the structure for the COMPASS coco json output
+    # it is not the same as the one used here, but it is similar
     coco_output = {
         "images": [],
         "annotations": [],
@@ -218,6 +257,12 @@ for pdf_filename in os.listdir(input_pdf_dir):
             {"id": 3, "name": "Text"},
             {"id": 4, "name": "Title"}
         ]
+    }
+    """
+    coco_output = {
+        "images": [],
+        "annotations": [],
+        "categories": categories
     }
 
     # Process each page.
@@ -248,12 +293,12 @@ for pdf_filename in os.listdir(input_pdf_dir):
         
         # For storage, convert each layout element to a dict (if available)
         for elem in merged_layout:
-            print(elem.score)
+            #print(elem)
             x1, y1, x2, y2 = elem.coordinates
             width = x2 - x1
             height = y2 - y1
             # Map element type to category_id
-            category_id = next((cat["id"] for cat in coco_output["categories"] if cat["id"] == elem.type), None)
+            category_id = next((cat["name"] for cat in coco_output["categories"] if cat["id"] == elem.type), None)
             if category_id is None:
                 print(f"Warning: Unknown element type '{elem.type}'")
                 continue
@@ -263,14 +308,60 @@ for pdf_filename in os.listdir(input_pdf_dir):
                 "category_id": category_id,
                 "bbox": [x1, y1, width, height],
                 "area": width * height,
-                "iscrowd": 0,
-                "score": elem.score,  # Store the score of the element
+                "score": elem.score,  # Include the score if available
+                "iscrowd": 0
             }
             coco_output["annotations"].append(annotation)
             annotation_id += 1
         
         # Optionally, generate an overlay image with the layout drawn.
-        overlay = lp.draw_box(page_img, merged_layout, box_width=3, show_element_type=True)
+        """
+        color_map = {
+            "column_header": (255, 0, 0),  # Red for column headers
+            "numerical_cell": (0, 255, 0),  # Green for numerical cells
+            "text_cell": (0, 0, 255)  # Blue for text cells
+        }
+        """
+        # Define a color map for the element types (numerical keys)
+        color_map = {
+            0: (255, 0, 0),  # Red for column headers
+            1: (0, 255, 0),  # Green for numerical cells
+            2: (0, 0, 255)   # Blue for text cells
+        }
+        # overlay = lp.draw_box(page_img, merged_layout, box_width=3, show_element_type=True, color_map=color_map)
+        
+        # Create a copy of the page image to draw the bounding boxes and scores
+        overlay = page_img.copy()
+
+        # Draw bounding boxes and write scores for each element in the merged layout
+        for elem in merged_layout:
+            #print(elem.score)
+            x1, y1, x2, y2 = map(int, elem.coordinates)  # Ensure coordinates are integers
+            box_color = color_map.get(elem.type, (0, 0, 0))  # Default to black if type is unknown
+
+            # Draw the bounding box
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), box_color, thickness=3)
+
+            # Write the score inside the box
+            score_text = f"{elem.score:.2f}"  # Format the score to 2 decimal places
+            font_scale = 0.5
+            font_thickness = 1
+            text_size = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+            text_x = x1 + 5  # Slightly offset from the top-left corner of the box
+            text_y = y1 + text_size[1] + 5
+            cv2.putText(
+                overlay,
+                score_text,
+                (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                box_color,  # Use the same color as the bounding box
+                font_thickness
+            )
+
+        # Add the overlay to the layout images
+                
+        
         # Ensure overlay is a NumPy array.
         if not isinstance(overlay, np.ndarray):
             overlay = np.array(overlay)
@@ -283,15 +374,17 @@ for pdf_filename in os.listdir(input_pdf_dir):
     print(f"Saved parsed layout to: {output_coco_path}")
     
     # If the toggle is on, generate a new PDF with the layouts overlaid.
+    # Replace the existing code for saving overlay images with the following:
+
     if generate_pdf_with_layouts and layout_images:
         temp_overlay_dir = os.path.join("temp_overlays", base_name)
         os.makedirs(temp_overlay_dir, exist_ok=True)
         overlay_paths = []
         for idx, overlay_img in enumerate(layout_images, start=1):
-            overlay_path = os.path.join(temp_overlay_dir, f"page_{idx}.png")
-            cv2.imwrite(overlay_path, overlay_img)
+            overlay_path = os.path.join(temp_overlay_dir, f"page_{idx}.jpg")  # Save as JPEG
+            save_compressed_image(overlay_img, overlay_path, quality=75)  # Compress the image
             overlay_paths.append(overlay_path)
-        
+
         output_pdf_path = os.path.join(pdfs_with_layouts_dir, f"{base_name}.pdf")
         try:
             with open(output_pdf_path, "wb") as f_out:
@@ -299,5 +392,4 @@ for pdf_filename in os.listdir(input_pdf_dir):
             print(f"Generated PDF with layouts: {output_pdf_path}")
         except Exception as e:
             print(f"Error generating PDF for {pdf_filename}: {e}")
-    
 print("Processing complete.")
