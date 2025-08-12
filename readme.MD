@@ -4,20 +4,18 @@ A Python project for detecting and analyzing document layouts using deep learnin
 
 ## Features
 
-- Layout detection in scanned documents
-- Preprocessing and visualization tools
-- Model training and evaluation scripts
+- It uses Layout Parser (https://layout-parser.github.io/) to find the internal structure of documents 
+- Generates layouts in COCO JSON format
+- Genrates PDFs with overlaid layouts
 
 ## Repository Structure
 
 ```
 econai-layoutdetection/
-├── data/               # Sample and training data
-├── models/             # Pretrained and custom models
-├── notebooks/          # Jupyter notebooks for experiments
-├── scripts/            # Utility and training scripts
+├── tools/               # tools to preprocess, convert between formats, manipulate etc.
 ├── requirements.txt    # Python dependencies
 ├── README.md           # Project documentation
+parse_pdf_layouts.py  # Runs layout detection model; input argument: single JSON config file
 ```
 
 ## Installation
@@ -31,21 +29,6 @@ econai-layoutdetection/
     ```bash
     pip install -r requirements.txt
     ```
-
-## Usage
-
-- Run layout detection:
-  ```bash
-  python scripts/detect_layout.py --input data/sample.pdf --output results/
-  ```
-- Train a new model:
-  ```bash
-  python scripts/train.py --config configs/train_config.yaml
-  ```
-
-## Notebooks
-
-Explore the `notebooks/` directory for example workflows and experiments.
 
 ## License
 
