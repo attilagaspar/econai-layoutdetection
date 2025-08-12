@@ -75,7 +75,7 @@ def coco_to_labelme(coco_json_path, images_dir, output_dir):
         print(f"Saved: {output_json_path}")
 
 # Iterate over immediate subfolders in the output base directory
-output_base_dir = "../census/coco_all"
+output_base_dir = "../../census/anna_agi_export/output"
 for subfolder in os.listdir(output_base_dir):
     subfolder_path = os.path.join(output_base_dir, subfolder)
     if os.path.isdir(subfolder_path):
