@@ -217,179 +217,168 @@ except Exception as e:
 
 annotation_id = 1
 
-# For each PDF in input_pdf_dir, process it.
-for pdf_filename in os.listdir(input_pdf_dir):
-    if not pdf_filename.lower().endswith(".pdf"):
-        continue
+# Process PDFs recursively through all subdirectories
+for root, dirs, files in os.walk(input_pdf_dir):
+    print(f"Processing directory: {root}")
+    for pdf_filename in files:
 
-    pdf_path = os.path.join(input_pdf_dir, pdf_filename)
-    print(pdf_path, get_pdf_dpi(pdf_path, 1))
-    base_name = os.path.splitext(pdf_filename)[0]
-    print(f"Processing PDF: {pdf_filename}")
-    
-    # Create output subfolder for the current PDF
-    pdf_output_dir = os.path.join(output_dir, base_name)
-    images_dir = os.path.join(pdf_output_dir, 'images')
-    os.makedirs(images_dir, exist_ok=True)
+        if not pdf_filename.lower().endswith(".pdf"):
+            continue
 
-    # Convert all pages of the PDF to images.
-    try:
-        pages = convert_from_path(pdf_path, dpi=300)
-    except Exception as e:
-        print(f"Error converting PDF {pdf_filename}: {e}")
-        continue
-
-    parsed_pages = []  # To collect layout information for each page.
-    layout_images = [] # If generating PDFs with layouts, collect overlay images.
-    
-
-    # COCO JSON structure
-    """
-    this is the structure for the COMPASS coco json output
-    # it is not the same as the one used here, but it is similar
-    coco_output = {
-        "images": [],
-        "annotations": [],
-        "categories": [
-            {"id": 0, "name": "Figure"},
-            {"id": 1, "name": "List"},
-            {"id": 2, "name": "Table"},
-            {"id": 3, "name": "Text"},
-            {"id": 4, "name": "Title"}
-        ]
-    }
-    """
-    coco_output = {
-        "images": [],
-        "annotations": [],
-        "categories": categories
-    }
-
-    # Process each page.
-    for page_num, page in enumerate(pages, start=1):
-        # Convert PIL image to numpy array (BGR)
-        page_img = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
+        pdf_path = os.path.join(root, pdf_filename)
+        print(pdf_path, get_pdf_dpi(pdf_path, 1))
+        base_name = os.path.splitext(pdf_filename)[0]
+        print(f"Processing PDF: {pdf_path}")
         
-        # Save the page image as JPG
-        image_path = os.path.join(images_dir, f"page_{page_num}.jpg")
-        cv2.imwrite(image_path, page_img)
-
-        # Run layout parser on the page image.
-        layout = model.detect(page_img)
+        # Calculate relative path from input_pdf_dir to maintain folder structure
+        relative_path = os.path.relpath(root, input_pdf_dir)
         
-        # Merge adjacent table elements.
-        # merged_layout = merge_adjacent_tables(layout, gap_threshold=10)
-        # new model does not have table layouts
-        merged_layout = layout
+        # Create output subfolder maintaining the same structure
+        if relative_path == '.':
+            # PDF is in root of input_pdf_dir
+            pdf_output_dir = os.path.join(output_dir, base_name)
+            pdf_parsed_layout_dir = os.path.join(parsed_layout_dir, base_name)
+            pdf_with_layouts_dir = os.path.join(pdfs_with_layouts_dir, base_name)
+        else:
+            # PDF is in a subdirectory
+            pdf_output_dir = os.path.join(output_dir, relative_path, base_name)
+            pdf_parsed_layout_dir = os.path.join(parsed_layout_dir, relative_path, base_name)
+            pdf_with_layouts_dir = os.path.join(pdfs_with_layouts_dir, relative_path)
         
-        # Add image info to COCO JSON
-        image_info = {
-            "id": page_num,
-            "file_name": f"page_{page_num}.jpg",
-            "width": page_img.shape[1],
-            "height": page_img.shape[0]
-        }
-        coco_output["images"].append(image_info)
-        
-        # For storage, convert each layout element to a dict (if available)
-        for elem in merged_layout:
-            #print(elem)
-            x1, y1, x2, y2 = elem.coordinates
-            width = x2 - x1
-            height = y2 - y1
-            # Map element type to category_id
-            category_id = next((cat["name"] for cat in coco_output["categories"] if cat["id"] == elem.type), None)
-            if category_id is None:
-                print(f"Warning: Unknown element type '{elem.type}'")
-                continue
-            annotation = {
-                "id": annotation_id,
-                "image_id": page_num,
-                "category_id": category_id,
-                "bbox": [x1, y1, width, height],
-                "area": width * height,
-                "score": elem.score,  # Include the score if available
-                "iscrowd": 0
-            }
-            coco_output["annotations"].append(annotation)
-            annotation_id += 1
-        
-        # Optionally, generate an overlay image with the layout drawn.
-        """
-        color_map = {
-            "column_header": (255, 0, 0),  # Red for column headers
-            "numerical_cell": (0, 255, 0),  # Green for numerical cells
-            "text_cell": (0, 0, 255)  # Blue for text cells
-        }
-        """
-        # Define a color map for the element types (numerical keys)
-        color_map = {
-            0: (255, 0, 0),  # Red for column headers
-            1: (0, 255, 0),  # Green for numerical cells
-            2: (0, 0, 255)   # Blue for text cells
-        }
-        # overlay = lp.draw_box(page_img, merged_layout, box_width=3, show_element_type=True, color_map=color_map)
-        
-        # Create a copy of the page image to draw the bounding boxes and scores
-        overlay = page_img.copy()
+        images_dir = os.path.join(pdf_output_dir, 'images')
+        os.makedirs(images_dir, exist_ok=True)
+        os.makedirs(pdf_parsed_layout_dir, exist_ok=True)
+        os.makedirs(pdf_with_layouts_dir, exist_ok=True)
 
-        # Draw bounding boxes and write scores for each element in the merged layout
-        for elem in merged_layout:
-            #print(elem.score)
-            x1, y1, x2, y2 = map(int, elem.coordinates)  # Ensure coordinates are integers
-            box_color = color_map.get(elem.type, (0, 0, 0))  # Default to black if type is unknown
-
-            # Draw the bounding box
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), box_color, thickness=3)
-
-            # Write the score inside the box
-            score_text = f"{elem.score:.2f}"  # Format the score to 2 decimal places
-            font_scale = 0.5
-            font_thickness = 1
-            text_size = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
-            text_x = x1 + 5  # Slightly offset from the top-left corner of the box
-            text_y = y1 + text_size[1] + 5
-            cv2.putText(
-                overlay,
-                score_text,
-                (text_x, text_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,
-                box_color,  # Use the same color as the bounding box
-                font_thickness
-            )
-
-        # Add the overlay to the layout images
-                
-        
-        # Ensure overlay is a NumPy array.
-        if not isinstance(overlay, np.ndarray):
-            overlay = np.array(overlay)
-        layout_images.append(overlay)
-    
-    # Save the parsed layout as a COCO JSON file.
-    output_coco_path = os.path.join(pdf_output_dir, f"{base_name}.json")
-    with open(output_coco_path, "w", encoding="utf-8") as f:
-        json.dump(coco_output, f, indent=2)
-    print(f"Saved parsed layout to: {output_coco_path}")
-    
-    # If the toggle is on, generate a new PDF with the layouts overlaid.
-    # Replace the existing code for saving overlay images with the following:
-
-    if generate_pdf_with_layouts and layout_images:
-        temp_overlay_dir = os.path.join("temp_overlays", base_name)
-        os.makedirs(temp_overlay_dir, exist_ok=True)
-        overlay_paths = []
-        for idx, overlay_img in enumerate(layout_images, start=1):
-            overlay_path = os.path.join(temp_overlay_dir, f"page_{idx}.jpg")  # Save as JPEG
-            save_compressed_image(overlay_img, overlay_path, quality=75)  # Compress the image
-            overlay_paths.append(overlay_path)
-
-        output_pdf_path = os.path.join(pdfs_with_layouts_dir, f"{base_name}.pdf")
+        # Convert all pages of the PDF to images.
         try:
-            with open(output_pdf_path, "wb") as f_out:
-                f_out.write(img2pdf.convert(overlay_paths))
-            print(f"Generated PDF with layouts: {output_pdf_path}")
+            pages = convert_from_path(pdf_path, dpi=300)
         except Exception as e:
-            print(f"Error generating PDF for {pdf_filename}: {e}")
+            print(f"Error converting PDF {pdf_filename}: {e}")
+            continue
+
+        parsed_pages = []  # To collect layout information for each page.
+        layout_images = [] # If generating PDFs with layouts, collect overlay images.
+        
+        # COCO JSON structure
+        coco_output = {
+            "images": [],
+            "annotations": [],
+            "categories": categories
+        }
+
+        # Process each page.
+        for page_num, page in enumerate(pages, start=1):
+            # Convert PIL image to numpy array (BGR)
+            page_img = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
+            
+            # Save the page image as JPG
+            image_path = os.path.join(images_dir, f"page_{page_num}.jpg")
+            cv2.imwrite(image_path, page_img)
+
+            # Run layout parser on the page image.
+            layout = model.detect(page_img)
+            
+            # Merge adjacent table elements.
+            # merged_layout = merge_adjacent_tables(layout, gap_threshold=10)
+            # new model does not have table layouts
+            merged_layout = layout
+            
+            # Add image info to COCO JSON
+            image_info = {
+                "id": page_num,
+                "file_name": f"page_{page_num}.jpg",
+                "width": page_img.shape[1],
+                "height": page_img.shape[0]
+            }
+            coco_output["images"].append(image_info)
+            
+            # For storage, convert each layout element to a dict (if available)
+            for elem in merged_layout:
+                #print(elem)
+                x1, y1, x2, y2 = elem.coordinates
+                width = x2 - x1
+                height = y2 - y1
+                # Map element type to category_id
+                category_id = next((cat["name"] for cat in coco_output["categories"] if cat["id"] == elem.type), None)
+                if category_id is None:
+                    print(f"Warning: Unknown element type '{elem.type}'")
+                    continue
+                annotation = {
+                    "id": annotation_id,
+                    "image_id": page_num,
+                    "category_id": category_id,
+                    "bbox": [x1, y1, width, height],
+                    "area": width * height,
+                    "score": elem.score,  # Include the score if available
+                    "iscrowd": 0
+                }
+                coco_output["annotations"].append(annotation)
+                annotation_id += 1
+            
+            # Define a color map for the element types (numerical keys)
+            color_map = {
+                0: (255, 0, 0),  # Red for column headers
+                1: (0, 255, 0),  # Green for numerical cells
+                2: (0, 0, 255)   # Blue for text cells
+            }
+            
+            # Create a copy of the page image to draw the bounding boxes and scores
+            overlay = page_img.copy()
+
+            # Draw bounding boxes and write scores for each element in the merged layout
+            for elem in merged_layout:
+                #print(elem.score)
+                x1, y1, x2, y2 = map(int, elem.coordinates)  # Ensure coordinates are integers
+                box_color = color_map.get(elem.type, (0, 0, 0))  # Default to black if type is unknown
+
+                # Draw the bounding box
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), box_color, thickness=3)
+
+                # Write the score inside the box
+                score_text = f"{elem.score:.2f}"  # Format the score to 2 decimal places
+                font_scale = 0.5
+                font_thickness = 1
+                text_size = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+                text_x = x1 + 5  # Slightly offset from the top-left corner of the box
+                text_y = y1 + text_size[1] + 5
+                cv2.putText(
+                    overlay,
+                    score_text,
+                    (text_x, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale,
+                    box_color,  # Use the same color as the bounding box
+                    font_thickness
+                )
+
+            # Ensure overlay is a NumPy array.
+            if not isinstance(overlay, np.ndarray):
+                overlay = np.array(overlay)
+            layout_images.append(overlay)
+        
+        # Save the parsed layout as a COCO JSON file.
+        output_coco_path = os.path.join(pdf_output_dir, f"{base_name}.json")
+        with open(output_coco_path, "w", encoding="utf-8") as f:
+            json.dump(coco_output, f, indent=2)
+        print(f"Saved parsed layout to: {output_coco_path}")
+        
+        # If the toggle is on, generate a new PDF with the layouts overlaid.
+        if generate_pdf_with_layouts and layout_images:
+            temp_overlay_dir = os.path.join("temp_overlays", relative_path if relative_path != '.' else '', base_name)
+            os.makedirs(temp_overlay_dir, exist_ok=True)
+            overlay_paths = []
+            for idx, overlay_img in enumerate(layout_images, start=1):
+                overlay_path = os.path.join(temp_overlay_dir, f"page_{idx}.jpg")  # Save as JPEG
+                save_compressed_image(overlay_img, overlay_path, quality=75)  # Compress the image
+                overlay_paths.append(overlay_path)
+
+            output_pdf_path = os.path.join(pdf_with_layouts_dir, f"{base_name}.pdf")
+            try:
+                with open(output_pdf_path, "wb") as f_out:
+                    f_out.write(img2pdf.convert(overlay_paths))
+                print(f"Generated PDF with layouts: {output_pdf_path}")
+            except Exception as e:
+                print(f"Error generating PDF for {pdf_filename}: {e}")
+
 print("Processing complete.")
