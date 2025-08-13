@@ -10,6 +10,13 @@ def coco_to_labelme(coco_json_path, images_dir, output_dir):
     with open(coco_json_path, 'r', encoding='utf-8') as f:
         coco_data = json.load(f)
 
+    # Validate COCO format
+    required_keys = ["images", "annotations", "categories"]
+    for key in required_keys:
+        if key not in coco_data:
+            print(f"Warning: '{coco_json_path}' is not a valid COCO JSON (missing '{key}' key). Skipping.")
+            return
+
     # Create output directory if not exists
     os.makedirs(output_dir, exist_ok=True)
 
@@ -78,18 +85,23 @@ def coco_to_labelme(coco_json_path, images_dir, output_dir):
 def process_directory_recursive(base_dir):
     """Recursively process directories looking for COCO JSON files"""
     for root, dirs, files in os.walk(base_dir):
-        # Look for JSON files in current directory
-        coco_json_path = None
+        # Look for JSON files in current directory (but skip LabelMe JSON files)
+        coco_json_files = []
         for file in files:
             if file.endswith(".json"):
-                coco_json_path = os.path.join(root, file)
-                break
+                file_path = os.path.join(root, file)
+                # Skip files that are likely LabelMe JSON files (in images subdirectory)
+                if "images" in root and file.startswith("page_"):
+                    continue
+                coco_json_files.append(file_path)
         
-        if coco_json_path:
+        # Process each potential COCO JSON file
+        for coco_json_path in coco_json_files:
             images_dir = root
             output_dir = root
             print(f"Processing: {coco_json_path}")
             coco_to_labelme(coco_json_path, images_dir, output_dir)
+
 
 # Check command line arguments
 if len(sys.argv) < 2:
