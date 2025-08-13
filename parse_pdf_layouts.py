@@ -59,6 +59,11 @@ categories = config["categories"]
 # Toggle: If True, generate new PDFs with the layouts overlaid.
 generate_pdf_with_layouts = True
 
+
+# Toggle: If True, skip PDFs that already have output JSON files
+skip_existing_outputs = True
+
+
 # Create output directories if they don't exist.
 for d in [output_dir, parsed_layout_dir, pdfs_with_layouts_dir]:
     if not os.path.exists(d):
@@ -245,10 +250,17 @@ for root, dirs, files in os.walk(input_pdf_dir):
             pdf_parsed_layout_dir = os.path.join(parsed_layout_dir, relative_path, base_name)
             pdf_with_layouts_dir = os.path.join(pdfs_with_layouts_dir, relative_path)
         
+        # Check if output JSON already exists and skip if toggle is on
+        output_coco_path = os.path.join(pdf_output_dir, f"{base_name}.json")
+        if skip_existing_outputs and os.path.exists(output_coco_path):
+            print(f"Skipping {pdf_filename} - output JSON already exists: {output_coco_path}")
+            continue
+        
         images_dir = os.path.join(pdf_output_dir, 'images')
         os.makedirs(images_dir, exist_ok=True)
         os.makedirs(pdf_parsed_layout_dir, exist_ok=True)
         os.makedirs(pdf_with_layouts_dir, exist_ok=True)
+
 
         # Convert all pages of the PDF to images.
         try:
