@@ -2,6 +2,7 @@
 import json
 import os
 import cv2
+import sys
 from collections import defaultdict
 
 def coco_to_labelme(coco_json_path, images_dir, output_dir):
@@ -74,22 +75,40 @@ def coco_to_labelme(coco_json_path, images_dir, output_dir):
 
         print(f"Saved: {output_json_path}")
 
-# Iterate over immediate subfolders in the output base directory
-output_base_dir = "../../census/anna_agi_export/output"
-for subfolder in os.listdir(output_base_dir):
-    subfolder_path = os.path.join(output_base_dir, subfolder)
-    if os.path.isdir(subfolder_path):
-        # Find the JSON file in the subfolder
+def process_directory_recursive(base_dir):
+    """Recursively process directories looking for COCO JSON files"""
+    for root, dirs, files in os.walk(base_dir):
+        # Look for JSON files in current directory
         coco_json_path = None
-        for file in os.listdir(subfolder_path):
+        for file in files:
             if file.endswith(".json"):
-                coco_json_path = os.path.join(subfolder_path, file)
+                coco_json_path = os.path.join(root, file)
                 break
         
         if coco_json_path:
-            images_dir = subfolder_path
-            output_dir = subfolder_path
+            images_dir = root
+            output_dir = root
             print(f"Processing: {coco_json_path}")
             coco_to_labelme(coco_json_path, images_dir, output_dir)
-        else:
-            print(f"No JSON file found in {subfolder_path}")
+
+# Check command line arguments
+if len(sys.argv) < 2:
+    print("Usage: python coco_to_labelme.py <output_base_dir>")
+    print("Example: python coco_to_labelme.py ../../census/anna_agi_export/output")
+    sys.exit(1)
+
+# Get output base directory from command line argument
+output_base_dir = sys.argv[1]
+
+# Check if the directory exists
+if not os.path.exists(output_base_dir):
+    print(f"Error: Directory '{output_base_dir}' does not exist")
+    sys.exit(1)
+
+if not os.path.isdir(output_base_dir):
+    print(f"Error: '{output_base_dir}' is not a directory")
+    sys.exit(1)
+
+print(f"Processing directory recursively: {output_base_dir}")
+process_directory_recursive(output_base_dir)
+print("Processing complete.")
