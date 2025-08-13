@@ -70,7 +70,7 @@ for d in [output_dir, parsed_layout_dir, pdfs_with_layouts_dir]:
         os.makedirs(d)
 
 # estimate dpi of a pdf page
-def get_pdf_dpi(pdf_path, page_num):
+def get_pdf_dpi(pdf_path, page_num=0):
     """
     Estimate the DPI of a PDF page.
     Args:
@@ -79,27 +79,43 @@ def get_pdf_dpi(pdf_path, page_num):
     Returns:
         float: Estimated DPI of the PDF page.
     """
-    pdf_doc = fitz.open(pdf_path)
-    page = pdf_doc.load_page(page_num)
-    
-    # Get page dimensions in points (1 point = 1/72 inch)
-    rect = page.rect
-    width_in_points = rect.width
-    height_in_points = rect.height
-    
-    # Render the page to an image
-    pix = page.get_pixmap(dpi=300)  # Render at 300 DPI
-    width_in_pixels = pix.width
-    height_in_pixels = pix.height
-    
-    # Calculate DPI
-    dpi_x = width_in_pixels / (width_in_points / 72)
-    dpi_y = height_in_pixels / (height_in_points / 72)
-    
-    # Average DPI
-    dpi = (dpi_x + dpi_y) / 2
-    
-    return dpi
+    try:
+        pdf_doc = fitz.open(pdf_path)
+        
+        # Check if the document has pages and adjust page_num if needed
+        if pdf_doc.page_count == 0:
+            pdf_doc.close()
+            return 300  # Default DPI if no pages
+        
+        # Use page 0 if requested page doesn't exist
+        if page_num >= pdf_doc.page_count:
+            page_num = 0
+            
+        page = pdf_doc.load_page(page_num)
+        
+        # Get page dimensions in points (1 point = 1/72 inch)
+        rect = page.rect
+        width_in_points = rect.width
+        height_in_points = rect.height
+        
+        # Render the page to an image
+        pix = page.get_pixmap(dpi=300)  # Render at 300 DPI
+        width_in_pixels = pix.width
+        height_in_pixels = pix.height
+        
+        # Calculate DPI
+        dpi_x = width_in_pixels / (width_in_points / 72)
+        dpi_y = height_in_pixels / (height_in_points / 72)
+        
+        # Average DPI
+        dpi = (dpi_x + dpi_y) / 2
+        
+        pdf_doc.close()
+        return dpi
+        
+    except Exception as e:
+        print(f"Error calculating DPI for {pdf_path}: {e}")
+        return 300  # Default DPI on error
 
 
 
@@ -230,11 +246,12 @@ for root, dirs, files in os.walk(input_pdf_dir):
         if not pdf_filename.lower().endswith(".pdf"):
             continue
 
+    
         pdf_path = os.path.join(root, pdf_filename)
-        print(pdf_path, get_pdf_dpi(pdf_path, 1))
+        print(pdf_path, get_pdf_dpi(pdf_path, 0))  # Changed from 1 to 0
         base_name = os.path.splitext(pdf_filename)[0]
         print(f"Processing PDF: {pdf_path}")
-        
+
         # Calculate relative path from input_pdf_dir to maintain folder structure
         relative_path = os.path.relpath(root, input_pdf_dir)
         
