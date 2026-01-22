@@ -1,0 +1,4 @@
+config_*.json
+output_*/
+pdfs_*/
+temp_overlays/
