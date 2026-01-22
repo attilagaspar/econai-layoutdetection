@@ -2,6 +2,7 @@ import os
 import json
 import cv2
 import shutil
+import argparse
 
 def sanitize_filename(path):
     # Replace os separators with underscores for unique filenames
@@ -94,10 +95,23 @@ def labelme_to_coco(input_base_dir, output_base_dir):
     print(f"Saved COCO JSON: {output_coco_path}")
     print(f"Images are in {images_out_dir}")
 
-# ---- CONFIG ----
-#input_base_dir = "C:/Users/agaspar/Dropbox/research/leporolt_adatok/compass/annotations"
-input_base_dir = "C:/Users/agaspar/Dropbox/research/leporolt_adatok/econai/census/census2_deskewed_output_check/hand_corrected_batches_1_9"
-#output_base_dir = "C:/Users/agaspar/Dropbox/research/leporolt_adatok/compass/coco_annotations"
-output_base_dir = "C:/Users/agaspar/Dropbox/research/leporolt_adatok/econai/census/census2_deskewed_output_check/retrain_input_1_16"
+def main():
+    parser = argparse.ArgumentParser(description="Convert LabelMe annotations to COCO format")
+    parser.add_argument("input_base_dir", 
+                        help="Base directory containing LabelMe JSON files and images")
+    parser.add_argument("output_base_dir", 
+                        help="Output directory for COCO format annotations and images")
+    
+    args = parser.parse_args()
+    
+    if not os.path.exists(args.input_base_dir):
+        print(f"Error: Input directory does not exist: {args.input_base_dir}")
+        return 1
+    
+    os.makedirs(args.output_base_dir, exist_ok=True)
+    
+    labelme_to_coco(args.input_base_dir, args.output_base_dir)
+    return 0
+
 if __name__ == "__main__":
-    labelme_to_coco(input_base_dir, output_base_dir)
+    main()
