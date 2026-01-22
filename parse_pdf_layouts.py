@@ -57,11 +57,11 @@ categories = config["categories"]
 #pdfs_with_layouts_dir = "pdfs_with_layouts"  # (Optional) Folder for PDFs with overlaid layouts
 
 # Toggle: If True, generate new PDFs with the layouts overlaid.
-generate_pdf_with_layouts = True
+generate_pdf_with_layouts = False
 
 
 # Toggle: If True, skip PDFs that already have output JSON files
-skip_existing_outputs = True
+skip_existing_outputs = False
 
 
 # Create output directories if they don't exist.
