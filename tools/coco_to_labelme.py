@@ -55,13 +55,23 @@ def coco_to_labelme(coco_json_path, images_dir, output_dir):
             category_id = annotation["category_id"]
             label = category_id_to_name.get(category_id, str(category_id))  # Use name if available, else ID
 
-            shape = {
+            # Start with a copy of the original annotation to preserve all custom fields
+            shape = annotation.copy()
+            
+            # Remove COCO-specific fields that don't belong in LabelMe
+            coco_specific_fields = ["id", "image_id", "category_id", "bbox", "area", "iscrowd", "segmentation"]
+            for field in coco_specific_fields:
+                shape.pop(field, None)
+            
+            # Add/override LabelMe-specific fields
+            shape.update({
                 "label": label,  # Now inherits from COCO category
                 "points": [[x, y], [x + bbox_width, y + bbox_height]],
                 "group_id": None,
                 "shape_type": "rectangle",
                 "flags": {}
-            }
+            })
+            
             shapes.append(shape)
 
         # Create LabelMe annotation structure
