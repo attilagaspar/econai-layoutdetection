@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 
-def extract_text_from_labelme_bbox(pdf_doc, page_num, labelme_points):
+def extract_text_from_labelme_bbox(pdf_doc, page_num, labelme_points, image_width, image_height):
     """
     Extract text from PDF using LabelMe bounding box coordinates.
     
@@ -14,6 +14,8 @@ def extract_text_from_labelme_bbox(pdf_doc, page_num, labelme_points):
         pdf_doc: PyMuPDF document object
         page_num: Page number (0-based)
         labelme_points: LabelMe points format [[x1,y1], [x2,y2]]
+        image_width: Original image width in pixels
+        image_height: Original image height in pixels
     
     Returns:
         Extracted text as string
@@ -22,13 +24,27 @@ def extract_text_from_labelme_bbox(pdf_doc, page_num, labelme_points):
         return ""
     
     page = pdf_doc[page_num]
+    pdf_rect = page.rect  # Get PDF page dimensions
     
-    # Convert LabelMe points [[x1,y1], [x2,y2]] to PyMuPDF rect [x0, y0, x1, y1]
+    # Convert LabelMe image coordinates to PDF coordinates
     point1, point2 = labelme_points[0], labelme_points[1]
-    x0, y0 = min(point1[0], point2[0]), min(point1[1], point2[1])
-    x1, y1 = max(point1[0], point2[0]), max(point1[1], point2[1])
     
-    rect = fitz.Rect(x0, y0, x1, y1)
+    # Get bounding box in image coordinates
+    img_x0, img_y0 = min(point1[0], point2[0]), min(point1[1], point2[1])
+    img_x1, img_y1 = max(point1[0], point2[0]), max(point1[1], point2[1])
+    
+    # Calculate scaling factors
+    scale_x = pdf_rect.width / image_width
+    scale_y = pdf_rect.height / image_height
+    
+    # Convert to PDF coordinates (scaling and coordinate system conversion)
+    pdf_x0 = img_x0 * scale_x
+    pdf_y0 = img_y0 * scale_y  # PDF uses same top-left origin for this conversion
+    pdf_x1 = img_x1 * scale_x
+    pdf_y1 = img_y1 * scale_y
+    
+    # Create rectangle for text extraction
+    rect = fitz.Rect(pdf_x0, pdf_y0, pdf_x1, pdf_y1)
     
     # Extract text from the specified rectangle
     text = page.get_text("text", clip=rect).strip()
@@ -90,6 +106,15 @@ def process_labelme_json(json_path, pdf_doc, page_num, verbose=True):
                 print(f"    WARNING: Not a LabelMe JSON (no 'shapes' key): {os.path.basename(json_path)}")
             return 0
         
+        # Get image dimensions from JSON
+        image_width = data.get('imageWidth', 0)
+        image_height = data.get('imageHeight', 0)
+        
+        if image_width == 0 or image_height == 0:
+            if verbose:
+                print(f"    WARNING: No image dimensions found in {os.path.basename(json_path)}")
+            return 0
+        
         shapes_processed = 0
         
         # Process each shape
@@ -97,12 +122,18 @@ def process_labelme_json(json_path, pdf_doc, page_num, verbose=True):
             if 'points' in shape and len(shape['points']) >= 2:
                 # Extract text from PDF using the shape's bounding box
                 try:
-                    extracted_text = extract_text_from_labelme_bbox(pdf_doc, page_num, shape['points'])
+                    extracted_text = extract_text_from_labelme_bbox(
+                        pdf_doc, page_num, shape['points'], image_width, image_height
+                    )
                     shape['original_pdf_text_layer'] = extracted_text
                     shapes_processed += 1
                     
                     if verbose and extracted_text and len(extracted_text) > 30:
                         print(f"      Shape '{shape.get('label', 'unknown')}': Extracted {len(extracted_text)} characters")
+                    elif verbose and extracted_text:
+                        # Show shorter text extracts
+                        preview = extracted_text.replace('\n', ' ')[:50]
+                        print(f"      Shape '{shape.get('label', 'unknown')}': '{preview}{'...' if len(extracted_text) > 50 else ''}'")
                     
                 except Exception as e:
                     if verbose:
